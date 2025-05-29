@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cross-Platform Video Recorder</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            place-content: center;
+        }
+
+        video {
+            width: 100%;
+            max-width: 480px;
+            border: 1px solid #ccc;
+        }
+
+        button {
+            margin: 5px;
+            padding: 10px;
+        }
+    </style>
+</head>
+
+<body>
+    <video id="preview" autoplay muted playsinline></video><br>
+
+    <div>
+        <button id="startBtn">Start Recording</button>
+        <button id="stopBtn" disabled>Stop Recording</button>
+        <a id="downloadLink" style="display: none;">Download</a>
+    </div>
+    
+    <script>
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const downloadLink = document.getElementById('downloadLink');
+        const preview = document.getElementById('preview');
+
+        let mediaRecorder;
+        let recordedChunks = [];
+        let stream;
+
+        async function initMedia() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                preview.srcObject = stream;
+            } catch (err) {
+                alert('Camera access denied or not supported on this browser.');
+                console.error(err);
+            }
+        }
+
+        function getSupportedMimeType() {
+            const types = [
+                // 'video/webm;codecs=vp9',
+                // 'video/webm;codecs=vp8',
+                // 'video/webm',
+                'video/mp4' // not supported by MediaRecorder in most browsers yet
+            ];
+            return types.find(type => MediaRecorder.isTypeSupported(type)) || '';
+        }
+
+        startBtn.onclick = () => {
+            const mimeType = getSupportedMimeType();
+            if (!mimeType) {
+                alert('No supported MIME type found for recording.');
+                return;
+            }
+
+            recordedChunks = [];
+            mediaRecorder = new MediaRecorder(stream, { mimeType });
+
+            mediaRecorder.ondataavailable = event => {
+                if (event.data.size > 0) {
+                    recordedChunks.push(event.data);
+                }
+            };
+
+            mediaRecorder.onstop = () => {
+                const blob = new Blob(recordedChunks, { type: mimeType });
+                const url = URL.createObjectURL(blob);
+                downloadLink.href = url;
+                downloadLink.download = `recording.${mimeType.includes('mp4') ? 'mp4' : 'webm'}`;
+                downloadLink.textContent = 'Download Recording';
+                downloadLink.style.display = 'inline';
+            };
+
+            mediaRecorder.start();
+            startBtn.disabled = true;
+            stopBtn.disabled = false;
+        };
+
+        stopBtn.onclick = () => {
+            mediaRecorder.stop();
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+        };
+
+        window.onload = initMedia;
+    </script>
+</body>
+
+</html>
