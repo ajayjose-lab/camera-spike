@@ -48,12 +48,12 @@
         async function initMedia() {
             try {
                 // stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-                alert("initMedia");
+                // alert("initMedia");
                 stream = await navigator.mediaDevices.getUserMedia({
                     video: { facingMode: { exact: "environment" } },
                     audio: true
                 });
-                alert("initMedia 2");
+                // alert("initMedia 2");
                 preview.srcObject = stream;
             } catch (err) {
                 alert('Camera access denied or not supported on this browser.');
@@ -113,4 +113,5 @@
 </body>
 
 </html>
+
 
