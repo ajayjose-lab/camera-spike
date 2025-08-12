@@ -23,6 +23,36 @@
             margin: 5px;
             padding: 10px;
         }
+
+        #logOutput {
+            font-family: monospace;
+            width: 100%;
+            max-width: 480px;
+            height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            padding: 8px;
+            margin-top: 16px;
+            font-size: 12px;
+            background: #f5f5f5;
+        }
+
+        .log-entry {
+            margin: 2px 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        .log-warn {
+            color: orange;
+        }
+
+        .log-error {
+            color: red;
+        }
+
+        .log-slow {
+            background: #fff3cd;
+        }
     </style>
 </head>
 
@@ -34,8 +64,73 @@
         <button id="stopBtn" disabled>Stop Recording</button>
         <a id="downloadLink" style="display: none;">Download</a>
     </div>
-    
+
+    <div id="logOutput"></div>
+
     <script>
+        const CONFIG = {
+            MAX_LOG_ENTRIES: 1000,
+            SLOW_THRESHOLD_MS: 200,
+            LOG_LEVEL: 'debug'
+        };
+
+        const inPageLogger = (() => {
+            const logOutput = document.getElementById('logOutput');
+            let entries = [];
+
+            const formatEntry = (level, msg, meta = {}) => {
+                const timestamp = new Date().toISOString();
+                const perfTime = performance.now().toFixed(2);
+                const metaStr = Object.keys(meta).length ? ` | ${JSON.stringify(meta)}` : '';
+                return `[${timestamp}][${perfTime}ms][${level}] ${msg}${metaStr}`;
+            };
+
+            const appendLog = (html) => {
+                const div = document.createElement('div');
+                div.className = 'log-entry';
+                div.innerHTML = html;
+                logOutput.appendChild(div);
+                logOutput.scrollTop = logOutput.scrollHeight;
+
+                entries.push(html);
+                if (entries.length > CONFIG.MAX_LOG_ENTRIES) {
+                    entries = entries.slice(-CONFIG.MAX_LOG_ENTRIES);
+                    while (logOutput.children.length > CONFIG.MAX_LOG_ENTRIES) {
+                        logOutput.removeChild(logOutput.firstChild);
+                    }
+                }
+            };
+
+            return {
+                trace: (name, meta) => appendLog(formatEntry('TRACE', name, meta)),
+                debug: (msg, meta) => appendLog(formatEntry('DEBUG', msg, meta)),
+                info: (msg) => appendLog(formatEntry('INFO', msg)),
+                warn: (msg) => appendLog(`<span class="log-warn">${formatEntry('WARN', msg)}</span>`),
+                error: (msg, err) => appendLog(`<span class="log-error">${formatEntry('ERROR', msg, { error: err?.message, stack: err?.stack })}</span>`)
+            };
+        })();
+
+        const traceWrap = (fn, name) => {
+            return async (...args) => {
+                const start = performance.now();
+                inPageLogger.trace(`${name} - Started`);
+                try {
+                    const result = await fn(...args);
+                    const duration = performance.now() - start;
+                    const logMsg = `${name} - Completed in ${duration.toFixed(2)}ms`;
+                    if (duration > CONFIG.SLOW_THRESHOLD_MS) {
+                        inPageLogger.warn(`${logMsg} [SLOW]`);
+                    } else {
+                        inPageLogger.trace(logMsg);
+                    }
+                    return result;
+                } catch (err) {
+                    inPageLogger.error(`${name} - Failed`, err);
+                    throw err;
+                }
+            };
+        };
+
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
         const downloadLink = document.getElementById('downloadLink');
@@ -46,36 +141,35 @@
         let stream;
 
         async function initMedia() {
+            inPageLogger.info('Initializing media capture');
             try {
-                // stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-                // alert("initMedia");
-                stream = await navigator.mediaDevices.getUserMedia({
+                const constraints = {
                     video: { facingMode: { exact: "environment" } },
                     audio: true
-                });
-                // alert("initMedia 2");
+                };
+
+                stream = await navigator.mediaDevices.getUserMedia(constraints);
                 preview.srcObject = stream;
+                inPageLogger.info('Media capture initialized successfully');
             } catch (err) {
-                alert('Camera access denied or not supported on this browser.');
-                alert(err);
-                console.error(err);
+                inPageLogger.error('Failed to initialize media capture', err);
+                if (err.name === 'NotAllowedError') {
+                    inPageLogger.warn('Camera/microphone permission denied');
+                }
             }
         }
 
         function getSupportedMimeType() {
-            const types = [
-                // 'video/webm;codecs=vp9',
-                // 'video/webm;codecs=vp8',
-                // 'video/webm',
-                'video/mp4' // not supported by MediaRecorder in most browsers yet
-            ];
-            return types.find(type => MediaRecorder.isTypeSupported(type)) || '';
+            const types = ['video/mp4'];
+            const supported = types.find(type => MediaRecorder.isTypeSupported(type)) || '';
+            inPageLogger.debug(`Selected MIME type: ${supported}`);
+            return supported;
         }
 
-        startBtn.onclick = () => {
+        startBtn.onclick = traceWrap(async () => {
             const mimeType = getSupportedMimeType();
             if (!mimeType) {
-                alert('No supported MIME type found for recording.');
+                inPageLogger.error('No supported MIME type found');
                 return;
             }
 
@@ -85,6 +179,7 @@
             mediaRecorder.ondataavailable = event => {
                 if (event.data.size > 0) {
                     recordedChunks.push(event.data);
+                    inPageLogger.debug(`Recorded chunk: ${event.data.size} bytes`);
                 }
             };
 
@@ -95,23 +190,23 @@
                 downloadLink.download = `recording.${mimeType.includes('mp4') ? 'mp4' : 'webm'}`;
                 downloadLink.textContent = 'Download Recording';
                 downloadLink.style.display = 'inline';
+                inPageLogger.info(`Recording completed: ${(blob.size / 1024 / 1024).toFixed(2)}MB`);
             };
 
             mediaRecorder.start();
             startBtn.disabled = true;
             stopBtn.disabled = false;
-        };
+            inPageLogger.info('Recording started');
+        }, 'startRecording');
 
-        stopBtn.onclick = () => {
+        stopBtn.onclick = traceWrap(() => {
             mediaRecorder.stop();
             startBtn.disabled = false;
             stopBtn.disabled = true;
-        };
+            inPageLogger.info('Recording stopped');
+        }, 'stopRecording');
 
-        window.onload = initMedia;
+        window.onload = traceWrap(initMedia, 'initMedia');
     </script>
 </body>
-
 </html>
-
-
