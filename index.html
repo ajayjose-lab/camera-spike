@@ -180,6 +180,8 @@
                 if (event.data.size > 0) {
                     recordedChunks.push(event.data);
                     inPageLogger.debug(`Recorded chunk: ${event.data.size} bytes`);
+                } else {
+                    inPageLogger.debug('ondataavailable: Received data with size 0', event);
                 }
             };
 
