@@ -147,27 +147,45 @@
                     video: { facingMode: { exact: "environment" } },
                     audio: true
                 };
-
+    
                 stream = await navigator.mediaDevices.getUserMedia(constraints);
                 preview.srcObject = stream;
                 inPageLogger.info('Media capture initialized successfully');
-
+    
+                // Black frame detection after small delay
+                await new Promise(r => setTimeout(r, 500));
+                const canvas = document.createElement('canvas');
+                canvas.width = preview.videoWidth || 1;
+                canvas.height = preview.videoHeight || 1;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(preview, 0, 0, canvas.width, canvas.height);
+                const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const allBlack = frame.data.every((val, idx) => (idx % 4 === 3) || val === 0);
+    
+                if (allBlack) {
+                    inPageLogger.warn('Detected black frames – camera likely blocked by another app (Zoom?)');
+                    stream.getTracks().forEach(t => t.stop());
+                    stream = null;
+                    return; // Prevents setting up recording on a dead stream
+                }
+    
                 // Track states and changes for each track
                 stream.getTracks().forEach(track => {
                     inPageLogger.debug(`Initial ${track.kind} track state: ${track.readyState}, muted: ${track.muted}`);
-
+    
                     track.onended = () => inPageLogger.warn(`${track.kind} track ended`);
                     track.onmute = () => inPageLogger.warn(`${track.kind} track muted`);
                     track.onunmute = () => inPageLogger.info(`${track.kind} track unmuted`);
                 });
-
+    
                 // Poll every second for state changes
                 setInterval(() => {
+                    if (!stream) return;
                     stream.getTracks().forEach(track => {
                         inPageLogger.debug(`Poll: ${track.kind} state=${track.readyState}, muted=${track.muted}`);
                     });
                 }, 1000);
-
+    
             } catch (err) {
                 inPageLogger.error('Failed to initialize media capture', err);
                 if (err.name === 'NotAllowedError') {
@@ -246,3 +264,4 @@
 </body>
 
 </html>
+
